@@ -38,6 +38,7 @@ open class WebtoonsTranslate(
 
     private val apiBaseUrl = "https://global.apis.naver.com".toHttpUrlOrNull()!!
     private val mobileBaseUrl = "https://m.webtoons.com".toHttpUrlOrNull()!!
+    private val translateBaseUrl = "https://translate.webtoons.com".toHttpUrlOrNull()!!
     private val thumbnailBaseUrl = "https://mwebtoon-phinf.pstatic.net"
 
     private val pageSize = 24
@@ -47,6 +48,11 @@ open class WebtoonsTranslate(
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .removeAll("Referer")
         .add("Referer", mobileBaseUrl.toString())
+
+    protected val translateHeaders: Headers = super.headersBuilder()
+        .removeAll("Referer")
+        .add("Referer", "https://translate.webtoons.com")
+        .build()
 
     private fun mangaRequest(page: Int, requeztSize: Int): Request {
         val url = apiBaseUrl
@@ -162,8 +168,6 @@ open class WebtoonsTranslate(
 
     override fun chapterFromElement(element: Element): SChapter = throw Exception("Not used")
 
-    override fun pageListParse(document: Document): List<Page> = throw Exception("Not used")
-
     override fun chapterListRequest(manga: SManga): Request {
         val mangaUrl = manga.url.toHttpUrlOrNull()!!
         val titleNo = mangaUrl.queryParameter("titleNo")
@@ -201,12 +205,12 @@ open class WebtoonsTranslate(
         date_upload = obj["updateYmdt"]!!.jsonPrimitive.long
         scanlator = obj["teamVersion"]!!.jsonPrimitive.int.takeIf { it != 0 }?.toString() ?: "(wiki)"
 
-        val chapterUrl = apiBaseUrl
-            .resolve("/lineWebtoon/ctrans/translatedEpisodeDetail_jsonp.json")!!
+        val chapterUrl = translateBaseUrl
+            .resolve("/translate/tool")!!
             .newBuilder()
-            .addQueryParameter("titleNo", obj["titleNo"]!!.jsonPrimitive.int.toString())
+            .addQueryParameter("webtoonNo", "000")
             .addQueryParameter("episodeNo", obj["episodeNo"]!!.jsonPrimitive.int.toString())
-            .addQueryParameter("languageCode", obj["languageCode"]!!.jsonPrimitive.content)
+            .addQueryParameter("language", obj["languageCode"]!!.jsonPrimitive.content)
             .addQueryParameter("teamVersion", obj["teamVersion"]!!.jsonPrimitive.int.toString())
             .toString()
 
@@ -214,16 +218,15 @@ open class WebtoonsTranslate(
     }
 
     override fun pageListRequest(chapter: SChapter): Request {
-        return GET(apiBaseUrl.resolve(chapter.url).toString(), headers)
+        return GET(translateBaseUrl.resolve(chapter.url).toString(), translateHeaders)
     }
 
-    override fun pageListParse(response: Response): List<Page> {
-        val result = json.parseToJsonElement(response.body!!.string()).jsonObject
+    override fun pageListParse(document: Document): List<Page> {
+        val docString = document.toString()
 
-        return result["result"]!!.jsonObject["imageInfo"]!!.jsonArray
-            .mapIndexed { i, jsonEl ->
-                Page(i, "", jsonEl.jsonObject["imageUrl"]!!.jsonPrimitive.content)
-            }
+        return Regex("""["]background["]: '([\S]+)'""").findAll(docString).toList().mapIndexed { i, pageParam ->
+            Page(i, "", pageParam.groupValues[1])
+        }
     }
 
     override fun getFilterList(): FilterList = FilterList()
